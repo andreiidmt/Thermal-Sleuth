@@ -33,6 +33,9 @@ const locationData = {
 const API_BASE_URL = 'http://127.0.0.1:8000';
 let backendAnomalyFeatures = [];
 let selectedZoneFeature = null;
+let anomalyRefreshTimer = null;
+let isLoadingAnomalies = false;
+const ANOMALY_REFRESH_INTERVAL_MS = 10000;
 
 // ==========================================
 // 2. MAPBOX INITIALIZATION
@@ -43,8 +46,8 @@ mapboxgl.accessToken = 'pk.eyJ1IjoiYW5kcmFhYTQ3IiwiYSI6ImNtb2U3aWR1YzBmYTkycnIze
 const map = new mapboxgl.Map({
     container: 'map',
     style: 'mapbox://styles/mapbox/dark-v11',
-    center: [25.0, 45.0], // Centrat pe România
-    zoom: 4,
+    center: [107.0, -7.0], // Citarum River, Indonesia (satellite scan area)
+    zoom: 7,
     pitch: 0,
     antialias: true,
     projection: 'globe'
@@ -187,6 +190,7 @@ map.on('load', () => {
 
     populateDropdown();
     loadAnomaliesFromBackend();
+    startAnomalyAutoRefresh();
 
     map.on('click', 'anomaly-core', (event) => {
         const feature = event.features && event.features[0];
@@ -230,6 +234,33 @@ function populateDropdown() {
     });
 }
 
+function populateDropdownWithAnomalies() {
+    // Remove old anomaly options (keep only predefined locations)
+    const options = Array.from(selectEl.querySelectorAll('option'));
+    options.forEach(opt => {
+        if (opt.value.startsWith('anomaly-')) {
+            opt.remove();
+        }
+    });
+
+    // Add anomalies as options (up to 50 to avoid huge list)
+    backendAnomalyFeatures.slice(0, 50).forEach((feature, index) => {
+        const option = document.createElement('option');
+        option.value = `anomaly-${index}`;
+        const temp = feature.properties.temp_celsius !== 'N/A' ? ` (${feature.properties.temp_celsius}°C)` : '';
+        option.textContent = `${feature.properties.name}${temp}`;
+        selectEl.appendChild(option);
+    });
+
+    if (backendAnomalyFeatures.length > 50) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = `... and ${backendAnomalyFeatures.length - 50} more anomalies`;
+        option.disabled = true;
+        selectEl.appendChild(option);
+    }
+}
+
 function generateMarkerGeoJSON(coords, color) {
     return {
         type: 'Feature',
@@ -247,11 +278,15 @@ function getSeverityFromTemp(tempCelsius) {
 
 function renderAnomalySource() {
     const source = map.getSource('anomaly-marker');
-    if (!source) return;
+    if (!source) {
+        console.warn('[renderAnomalySource] anomaly-marker source not found on map');
+        return;
+    }
 
     const features = [...backendAnomalyFeatures];
     if (selectedZoneFeature) features.push(selectedZoneFeature);
 
+    console.log(`[${new Date().toLocaleTimeString()}] Rendering ${features.length} total features on map`);
     source.setData({
         type: 'FeatureCollection',
         features
@@ -259,13 +294,18 @@ function renderAnomalySource() {
 }
 
 async function loadAnomaliesFromBackend() {
+    if (isLoadingAnomalies) return;
+    isLoadingAnomalies = true;
+
     try {
+        console.log(`[${new Date().toLocaleTimeString()}] Fetching anomalies from ${API_BASE_URL}/anomalies/`);
         const response = await fetch(`${API_BASE_URL}/anomalies/`);
         if (!response.ok) {
             throw new Error(`Backend returned HTTP ${response.status}`);
         }
 
         const anomalies = await response.json();
+        console.log(`[${new Date().toLocaleTimeString()}] Received ${anomalies.length} anomalies from backend`);
         if (!Array.isArray(anomalies)) {
             throw new Error('Unexpected payload received from backend.');
         }
@@ -304,8 +344,9 @@ async function loadAnomaliesFromBackend() {
         }
 
         renderAnomalySource();
+        populateDropdownWithAnomalies();
     } catch (error) {
-        console.error('Failed to load anomalies from backend:', error);
+        console.error(`[${new Date().toLocaleTimeString()}] Failed to load anomalies from backend:`, error.message);
         backendAnomalyFeatures = Object.values(locationData).map((zone) => ({
             type: 'Feature',
             properties: {
@@ -320,36 +361,85 @@ async function loadAnomaliesFromBackend() {
             }
         }));
         renderAnomalySource();
+    } finally {
+        isLoadingAnomalies = false;
     }
+}
+
+function startAnomalyAutoRefresh() {
+    console.log(`[${new Date().toLocaleTimeString()}] Starting auto-refresh polling every ${ANOMALY_REFRESH_INTERVAL_MS}ms`);
+    if (anomalyRefreshTimer) clearInterval(anomalyRefreshTimer);
+
+    anomalyRefreshTimer = setInterval(() => {
+        loadAnomaliesFromBackend();
+    }, ANOMALY_REFRESH_INTERVAL_MS);
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            console.log(`[${new Date().toLocaleTimeString()}] Page became visible, refreshing anomalies`);
+            loadAnomaliesFromBackend();
+        }
+    });
 }
 
 selectEl.addEventListener('change', (e) => {
     const targetKey = e.target.value;
-    const data = locationData[targetKey];
+    
+    // Check if it's a predefined location
+    if (locationData[targetKey]) {
+        const data = locationData[targetKey];
 
-    if (!data) return;
+        document.getElementById('cause-text').textContent = data.synthesis.cause;
+        document.getElementById('impact-text').textContent = data.synthesis.impact;
+        document.getElementById('solution-text').textContent = data.synthesis.solution;
 
-    // AI AICI ERA CODUL CARE OPRA SATELITII. A FOST STERS.
+        const badge = document.getElementById('severity-badge');
+        badge.textContent = data.synthesis.severity;
+        badge.className = `badge ${data.synthesis.severityClass}`;
 
-    document.getElementById('cause-text').textContent = data.synthesis.cause;
-    document.getElementById('impact-text').textContent = data.synthesis.impact;
-    document.getElementById('solution-text').textContent = data.synthesis.solution;
+        synthesisPanel.classList.remove('hidden');
 
-    const badge = document.getElementById('severity-badge');
-    badge.textContent = data.synthesis.severity;
-    badge.className = `badge ${data.synthesis.severityClass}`;
+        map.flyTo({
+            ...data.camera,
+            essential: true,
+            duration: 3500,
+            curve: 1.2
+        });
 
-    synthesisPanel.classList.remove('hidden');
+        setTimeout(() => {
+            selectedZoneFeature = generateMarkerGeoJSON(data.dischargePoint, data.markerColor);
+            renderAnomalySource();
+        }, 2000);
+    } 
+    // Check if it's a satellite-detected anomaly
+    else if (targetKey.startsWith('anomaly-')) {
+        const anomalyIndex = parseInt(targetKey.split('-')[1]);
+        const anomaly = backendAnomalyFeatures[anomalyIndex];
+        
+        if (!anomaly) return;
 
-    map.flyTo({
-        ...data.camera,
-        essential: true,
-        duration: 3500,
-        curve: 1.2
-    });
+        const coords = anomaly.geometry.coordinates;
+        const props = anomaly.properties;
+        
+        // Show anomaly details in synthesis panel
+        document.getElementById('cause-text').textContent = 'Satellite-detected thermal anomaly';
+        document.getElementById('impact-text').textContent = `Location: ${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}`;
+        document.getElementById('solution-text').textContent = `Temperature: ${props.temp_celsius}°C`;
 
-    setTimeout(() => {
-        selectedZoneFeature = generateMarkerGeoJSON(data.dischargePoint, data.markerColor);
-        renderAnomalySource();
-    }, 2000);
+        const badge = document.getElementById('severity-badge');
+        badge.textContent = props.severity;
+        badge.className = `badge severity-${props.severity.toLowerCase()}`;
+
+        synthesisPanel.classList.remove('hidden');
+
+        // Fly to anomaly
+        map.flyTo({
+            center: coords,
+            zoom: 14,
+            essential: true,
+            duration: 2000,
+            pitch: 45,
+            bearing: 0
+        });
+    }
 });
