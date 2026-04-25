@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThermalSleuth | Thermal Pollution Detection</title>
+
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="map"></div>
+
+<aside class="dashboard-panel">
+    <header class="panel-header">
+        <h1>ThermalSleuth</h1>
+        <p class="subtitle">Copernicus Sentinel-3 Telemetry</p>
+    </header>
+
+    <section class="controls">
+        <label for="location-select">Select Monitoring Zone:</label>
+        <select id="location-select">
+            <option value="" disabled selected>-- Initialize Satellite Link --</option>
+        </select>
+    </section>
+
+    <section id="synthesis-panel" class="synthesis-panel hidden">
+        <div class="data-group">
+            <h3>Severity Level</h3>
+            <div id="severity-badge" class="badge">N/A</div>
+        </div>
+
+        <div class="data-group">
+            <h3>Cause of Pollution</h3>
+            <p id="cause-text">Awaiting telemetry...</p>
+        </div>
+
+        <div class="data-group">
+            <h3>Impact Analysis</h3>
+            <p id="impact-text">Awaiting telemetry...</p>
+        </div>
+
+        <div class="data-group">
+            <h3>Proposed Solution</h3>
+            <p id="solution-text">Awaiting telemetry...</p>
+        </div>
+    </section>
+</aside>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
