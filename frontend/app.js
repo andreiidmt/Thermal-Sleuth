@@ -30,6 +30,10 @@ const locationData = {
     }
 };
 
+const API_BASE_URL = 'http://127.0.0.1:8000';
+let backendAnomalyFeatures = [];
+let selectedZoneFeature = null;
+
 // ==========================================
 // 2. MAPBOX INITIALIZATION
 // ==========================================
@@ -182,6 +186,33 @@ map.on('load', () => {
     });
 
     populateDropdown();
+    loadAnomaliesFromBackend();
+
+    map.on('click', 'anomaly-core', (event) => {
+        const feature = event.features && event.features[0];
+        if (!feature) return;
+
+        const coordinates = feature.geometry.coordinates.slice();
+        const props = feature.properties || {};
+        const popupHtml = `
+            <strong>${props.name || 'Thermal anomaly'}</strong><br>
+            Temperature: ${props.temp_celsius || 'N/A'} °C<br>
+            Severity: ${props.severity || 'N/A'}
+        `;
+
+        new mapboxgl.Popup()
+            .setLngLat(coordinates)
+            .setHTML(popupHtml)
+            .addTo(map);
+    });
+
+    map.on('mouseenter', 'anomaly-core', () => {
+        map.getCanvas().style.cursor = 'pointer';
+    });
+
+    map.on('mouseleave', 'anomaly-core', () => {
+        map.getCanvas().style.cursor = '';
+    });
 });
 
 // ==========================================
@@ -201,13 +232,95 @@ function populateDropdown() {
 
 function generateMarkerGeoJSON(coords, color) {
     return {
-        type: 'FeatureCollection',
-        features: [{
-            type: 'Feature',
-            properties: { color: color },
-            geometry: { type: 'Point', coordinates: coords }
-        }]
+        type: 'Feature',
+        properties: { color: color, name: 'Selected monitoring zone', severity: 'Manual' },
+        geometry: { type: 'Point', coordinates: coords }
     };
+}
+
+function getSeverityFromTemp(tempCelsius) {
+    if (tempCelsius >= 38) return { level: 'Critical', color: '#ef4444' };
+    if (tempCelsius >= 34) return { level: 'High', color: '#f97316' };
+    if (tempCelsius >= 30) return { level: 'Moderate', color: '#eab308' };
+    return { level: 'Low', color: '#22c55e' };
+}
+
+function renderAnomalySource() {
+    const source = map.getSource('anomaly-marker');
+    if (!source) return;
+
+    const features = [...backendAnomalyFeatures];
+    if (selectedZoneFeature) features.push(selectedZoneFeature);
+
+    source.setData({
+        type: 'FeatureCollection',
+        features
+    });
+}
+
+async function loadAnomaliesFromBackend() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/anomalies/`);
+        if (!response.ok) {
+            throw new Error(`Backend returned HTTP ${response.status}`);
+        }
+
+        const anomalies = await response.json();
+        if (!Array.isArray(anomalies)) {
+            throw new Error('Unexpected payload received from backend.');
+        }
+
+        backendAnomalyFeatures = anomalies.map((anomaly) => {
+            const severity = getSeverityFromTemp(anomaly.temp_celsius);
+            return {
+                type: 'Feature',
+                properties: {
+                    color: severity.color,
+                    severity: severity.level,
+                    name: anomaly.name,
+                    temp_celsius: anomaly.temp_celsius
+                },
+                geometry: {
+                    type: 'Point',
+                    coordinates: [anomaly.lon, anomaly.lat]
+                }
+            };
+        });
+
+        if (backendAnomalyFeatures.length === 0) {
+            backendAnomalyFeatures = Object.values(locationData).map((zone) => ({
+                type: 'Feature',
+                properties: {
+                    color: zone.markerColor,
+                    severity: zone.synthesis.severity,
+                    name: zone.name,
+                    temp_celsius: 'N/A'
+                },
+                geometry: {
+                    type: 'Point',
+                    coordinates: zone.dischargePoint
+                }
+            }));
+        }
+
+        renderAnomalySource();
+    } catch (error) {
+        console.error('Failed to load anomalies from backend:', error);
+        backendAnomalyFeatures = Object.values(locationData).map((zone) => ({
+            type: 'Feature',
+            properties: {
+                color: zone.markerColor,
+                severity: zone.synthesis.severity,
+                name: zone.name,
+                temp_celsius: 'N/A'
+            },
+            geometry: {
+                type: 'Point',
+                coordinates: zone.dischargePoint
+            }
+        }));
+        renderAnomalySource();
+    }
 }
 
 selectEl.addEventListener('change', (e) => {
@@ -236,7 +349,7 @@ selectEl.addEventListener('change', (e) => {
     });
 
     setTimeout(() => {
-        const geojson = generateMarkerGeoJSON(data.dischargePoint, data.markerColor);
-        map.getSource('anomaly-marker').setData(geojson);
+        selectedZoneFeature = generateMarkerGeoJSON(data.dischargePoint, data.markerColor);
+        renderAnomalySource();
     }, 2000);
 });

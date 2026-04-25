@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException
+from typing import List
+from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from database import engine, SessionLocal, Base
 import models, schemas, crud
@@ -29,6 +30,6 @@ def get_db():
 def add_anomaly(anomaly: schemas.AnomalyCreate, db: Session = Depends(get_db)):
     return crud.create_anomaly(db=db, anomaly=anomaly)
 
-@app.get("/anomalies/")
+@app.get("/anomalies/", response_model=List[schemas.Anomaly])
 def read_anomalies(db: Session = Depends(get_db)):
     return crud.get_anomalies(db)
