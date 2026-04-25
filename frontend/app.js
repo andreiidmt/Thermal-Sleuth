@@ -34,7 +34,7 @@ const locationData = {
 // 2. MAPBOX INITIALIZATION
 // ==========================================
 // TODO: Pune token-ul tău de la Mapbox aici (păstrează ghilimelele!)
-mapboxgl.accessToken = '';
+mapboxgl.accessToken = 'pk.eyJ1IjoiYW5kcmFhYTQ3IiwiYSI6ImNtb2U3aWR1YzBmYTkycnIzemQ3bnM4bmMifQ.69LxaNB6Iim7lpVNCOTz2w';
 
 const map = new mapboxgl.Map({
     container: 'map',
