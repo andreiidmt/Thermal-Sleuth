@@ -3,6 +3,8 @@ import datetime
 import requests
 
 PROJECT_ID = 'thermal-sleuth'
+EUROPE_ROI_BBOX = [-25.0, 34.0, 45.0, 72.0]
+LOCAL_ANOMALY_DELTA_C = 2.5
 
 
 def initialize_earth_engine():
@@ -21,8 +23,8 @@ def run_satellite_scan_and_push():
     initialize_earth_engine()
 
     # --- EARTH ENGINE LOGIC ---
-    # Citarum River area (West Java, Indonesia)
-    roi = ee.Geometry.Polygon([[[106.55, -7.25], [107.95, -7.25], [107.95, -6.60], [106.55, -6.60]]])
+    # Europe-wide ROI including Iceland and Atlantic approaches.
+    roi = ee.Geometry.Rectangle(EUROPE_ROI_BBOX, geodesic=False)
     water_mask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select('occurrence').gt(50)
     
     today = datetime.datetime.now()
@@ -36,7 +38,7 @@ def run_satellite_scan_and_push():
     image_count = collection.size().getInfo()
     print(f"🛰️ Images found in date range: {image_count}")
     if image_count == 0:
-        print("❌ No satellite images found for this week.")
+        print(f"❌ No satellite images found for Europe ROI bbox {EUROPE_ROI_BBOX} in this time window.")
         return
 
     recent_image = ee.Image(collection.first())
@@ -44,7 +46,12 @@ def run_satellite_scan_and_push():
     # Extract temp and find anomalies
     current_temp = recent_image.select('ST_B10').multiply(0.00341802).add(149.0).subtract(273.15)
     current_temp = current_temp.updateMask(water_mask)
-    anomalies = current_temp.gt(25) # Flagging water > 25°C
+
+    # Detect local hotspots above neighborhood baseline, so colder regions
+    # (such as Icelandic waters) remain eligible for anomaly detection.
+    local_baseline = current_temp.focal_mean(radius=5000, units='meters')
+    temp_delta = current_temp.subtract(local_baseline)
+    anomalies = temp_delta.gt(LOCAL_ANOMALY_DELTA_C)
 
     # Convert to vectors. The ROI is large, so enable bestEffort and raise maxPixels.
     anomaly_vectors = anomalies.selfMask().reduceToVectors(

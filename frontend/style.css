@@ -141,3 +141,18 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-glass); border-radius: 3px; }
+
+/* Ensure map popups stay readable on the default white popup background */
+.mapboxgl-popup-content {
+    color: #0f172a;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
+.mapboxgl-popup-content strong {
+    color: #0b3b5c;
+}
+
+.mapboxgl-popup-close-button {
+    color: #0f172a;
+}

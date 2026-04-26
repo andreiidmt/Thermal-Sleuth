@@ -32,10 +32,13 @@ const locationData = {
 
 const API_BASE_URL = 'http://127.0.0.1:8000';
 let backendAnomalyFeatures = [];
+let dropdownAnomalyFeatures = [];
 let selectedZoneFeature = null;
 let anomalyRefreshTimer = null;
 let isLoadingAnomalies = false;
 const ANOMALY_REFRESH_INTERVAL_MS = 10000;
+const DROPDOWN_CLUSTER_RADIUS_KM = 5;
+const MAX_DROPDOWN_ANOMALY_GROUPS = 50;
 
 // ==========================================
 // 2. MAPBOX INITIALIZATION
@@ -46,8 +49,8 @@ mapboxgl.accessToken = 'pk.eyJ1IjoiYW5kcmFhYTQ3IiwiYSI6ImNtb2U3aWR1YzBmYTkycnIze
 const map = new mapboxgl.Map({
     container: 'map',
     style: 'mapbox://styles/mapbox/dark-v11',
-    center: [107.0, -7.0], // Citarum River, Indonesia (satellite scan area)
-    zoom: 7,
+    center: [15.0, 50.0], // Europe-wide monitoring view
+    zoom: 4,
     pitch: 0,
     antialias: true,
     projection: 'globe'
@@ -243,19 +246,28 @@ function populateDropdownWithAnomalies() {
         }
     });
 
-    // Add anomalies as options (up to 50 to avoid huge list)
-    backendAnomalyFeatures.slice(0, 50).forEach((feature, index) => {
+    dropdownAnomalyFeatures = clusterAnomalyFeaturesForDropdown(backendAnomalyFeatures, DROPDOWN_CLUSTER_RADIUS_KM);
+
+    // Add clustered anomaly groups as options (up to 50 to avoid huge list)
+    dropdownAnomalyFeatures.slice(0, MAX_DROPDOWN_ANOMALY_GROUPS).forEach((feature, index) => {
         const option = document.createElement('option');
-        option.value = `anomaly-${index}`;
-        const temp = feature.properties.temp_celsius !== 'N/A' ? ` (${feature.properties.temp_celsius}°C)` : '';
-        option.textContent = `${feature.properties.name}${temp}`;
+        option.value = `anomaly-cluster-${index}`;
+
+        const props = feature.properties || {};
+        const clusterSize = props.cluster_size || 1;
+        const clusterTemp = props.max_temp_celsius !== 'N/A' ? ` (${props.max_temp_celsius}°C)` : '';
+        const clusterSuffix = clusterSize > 1
+            ? ` - ${clusterSize} detections in ${DROPDOWN_CLUSTER_RADIUS_KM}km`
+            : '';
+
+        option.textContent = `${props.name}${clusterTemp}${clusterSuffix}`;
         selectEl.appendChild(option);
     });
 
-    if (backendAnomalyFeatures.length > 50) {
+    if (dropdownAnomalyFeatures.length > MAX_DROPDOWN_ANOMALY_GROUPS) {
         const option = document.createElement('option');
         option.value = '';
-        option.textContent = `... and ${backendAnomalyFeatures.length - 50} more anomalies`;
+        option.textContent = `... and ${dropdownAnomalyFeatures.length - MAX_DROPDOWN_ANOMALY_GROUPS} more anomaly groups`;
         option.disabled = true;
         selectEl.appendChild(option);
     }
@@ -274,6 +286,119 @@ function getSeverityFromTemp(tempCelsius) {
     if (tempCelsius >= 34) return { level: 'High', color: '#f97316' };
     if (tempCelsius >= 30) return { level: 'Moderate', color: '#eab308' };
     return { level: 'Low', color: '#22c55e' };
+}
+
+function toRadians(degrees) {
+    return (degrees * Math.PI) / 180;
+}
+
+function haversineDistanceKm(coordA, coordB) {
+    if (!Array.isArray(coordA) || !Array.isArray(coordB)) return Number.POSITIVE_INFINITY;
+
+    const [lon1, lat1] = coordA;
+    const [lon2, lat2] = coordB;
+    const earthRadiusKm = 6371;
+
+    const dLat = toRadians(lat2 - lat1);
+    const dLon = toRadians(lon2 - lon1);
+
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusKm * c;
+}
+
+function getNumericTemperature(value) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function clusterAnomalyFeaturesForDropdown(features, radiusKm) {
+    if (!Array.isArray(features) || features.length === 0) {
+        return [];
+    }
+
+    const visited = new Array(features.length).fill(false);
+    const clusters = [];
+
+    for (let i = 0; i < features.length; i++) {
+        if (visited[i]) continue;
+
+        const queue = [i];
+        const memberIndexes = [];
+        visited[i] = true;
+
+        while (queue.length > 0) {
+            const currentIndex = queue.shift();
+            memberIndexes.push(currentIndex);
+
+            for (let j = 0; j < features.length; j++) {
+                if (visited[j]) continue;
+
+                const distanceKm = haversineDistanceKm(
+                    features[currentIndex]?.geometry?.coordinates,
+                    features[j]?.geometry?.coordinates
+                );
+
+                if (distanceKm <= radiusKm) {
+                    visited[j] = true;
+                    queue.push(j);
+                }
+            }
+        }
+
+        const members = memberIndexes.map(index => features[index]);
+
+        const representative = members.reduce((best, current) => {
+            if (!best) return current;
+
+            const bestTemp = getNumericTemperature(best.properties?.temp_celsius);
+            const currentTemp = getNumericTemperature(current.properties?.temp_celsius);
+
+            if (currentTemp === null) return best;
+            if (bestTemp === null) return current;
+            return currentTemp > bestTemp ? current : best;
+        }, null) || members[0];
+
+        const maxClusterTemp = members.reduce((maxTemp, feature) => {
+            const temp = getNumericTemperature(feature.properties?.temp_celsius);
+            if (temp === null) return maxTemp;
+            return Math.max(maxTemp, temp);
+        }, Number.NEGATIVE_INFINITY);
+
+        const clusterSize = members.length;
+        const representativeName = representative.properties?.name || 'Thermal anomaly';
+
+        clusters.push({
+            ...representative,
+            properties: {
+                ...representative.properties,
+                name: clusterSize > 1 ? `Thermal anomaly cluster near ${representativeName}` : representativeName,
+                cluster_size: clusterSize,
+                max_temp_celsius: maxClusterTemp === Number.NEGATIVE_INFINITY
+                    ? 'N/A'
+                    : Number(maxClusterTemp.toFixed(1)),
+                cluster_radius_km: radiusKm
+            }
+        });
+    }
+
+    clusters.sort((a, b) => {
+        const sizeDiff = (b.properties?.cluster_size || 1) - (a.properties?.cluster_size || 1);
+        if (sizeDiff !== 0) return sizeDiff;
+
+        const aTemp = getNumericTemperature(a.properties?.max_temp_celsius);
+        const bTemp = getNumericTemperature(b.properties?.max_temp_celsius);
+        if (aTemp === null && bTemp === null) return 0;
+        if (aTemp === null) return 1;
+        if (bTemp === null) return -1;
+        return bTemp - aTemp;
+    });
+
+    return clusters;
 }
 
 function renderAnomalySource() {
@@ -361,6 +486,7 @@ async function loadAnomaliesFromBackend() {
             }
         }));
         renderAnomalySource();
+        populateDropdownWithAnomalies();
     } finally {
         isLoadingAnomalies = false;
     }
@@ -412,19 +538,27 @@ selectEl.addEventListener('change', (e) => {
         }, 2000);
     } 
     // Check if it's a satellite-detected anomaly
-    else if (targetKey.startsWith('anomaly-')) {
-        const anomalyIndex = parseInt(targetKey.split('-')[1]);
-        const anomaly = backendAnomalyFeatures[anomalyIndex];
+    else if (targetKey.startsWith('anomaly-cluster-')) {
+        const anomalyIndex = parseInt(targetKey.split('-')[2], 10);
+        const anomaly = dropdownAnomalyFeatures[anomalyIndex];
         
         if (!anomaly) return;
 
         const coords = anomaly.geometry.coordinates;
         const props = anomaly.properties;
+        const clusterSize = props.cluster_size || 1;
         
         // Show anomaly details in synthesis panel
-        document.getElementById('cause-text').textContent = 'Satellite-detected thermal anomaly';
+        document.getElementById('cause-text').textContent = clusterSize > 1
+            ? `Clustered thermal anomaly (${clusterSize} detections within ${DROPDOWN_CLUSTER_RADIUS_KM} km)`
+            : 'Satellite-detected thermal anomaly';
         document.getElementById('impact-text').textContent = `Location: ${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}`;
-        document.getElementById('solution-text').textContent = `Temperature: ${props.temp_celsius}°C`;
+
+        if (clusterSize > 1) {
+            document.getElementById('solution-text').textContent = `Cluster max temperature: ${props.max_temp_celsius}°C`;
+        } else {
+            document.getElementById('solution-text').textContent = `Temperature: ${props.temp_celsius}°C`;
+        }
 
         const badge = document.getElementById('severity-badge');
         badge.textContent = props.severity;
