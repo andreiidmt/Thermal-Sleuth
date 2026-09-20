@@ -16,11 +16,10 @@ Thermal Sleuth provides a bird's-eye view monitoring system using the following:
 
 -Google Earth Engine: used to extract data that we later compile in Python for our database.
 
+# Features
+
+-Automated Anomaly Clustering: Identifies thermal spikes clustered within a 5km radius.
+-Interactive UI: Real-time globe visualization featuring severity levels, impact metrics, and temperature tracking.
+
 <img width="1830" height="1026" alt="image" src="https://github.com/user-attachments/assets/70b8b405-acd7-4380-8787-b75bff44f534" />
-
-# Official Taikai page
-
-For full showcase, please refer to: https://taikai.network/cassinihackathons/hackathons/space-for-water/projects/cmnzvxw2t026om5h3fqhchosw/idea
-
-
 
