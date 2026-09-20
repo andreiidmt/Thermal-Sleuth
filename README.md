@@ -2,6 +2,8 @@
 
 > **11th CASSINI Hackathon Project**
 
+For a full showcase, please refer to: https://taikai.network/cassinihackathons/hackathons/space-for-water/projects/cmnzvxw2t026om5h3fqhchosw/idea
+
 # Core Idea
 
 Thermal Sleuth is a project that will help in unmasking invisible pollution by using real-time satellite detection of illegal industrial thermal dumping in water.
