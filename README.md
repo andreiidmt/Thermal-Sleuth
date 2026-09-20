@@ -10,7 +10,7 @@ Thermal Sleuth is a project that will help in unmasking invisible pollution by u
 
 Thermal Sleuth provides a bird's-eye view monitoring system using the following: 
 
-- Copernicus Sentinel-3 (SLSTR): thermal infrared sensors to detect unnatural heat anomalies in water bodies at night across vast regions.
+-Copernicus Sentinel-3 (SLSTR): thermal infrared sensors to detect unnatural heat anomalies in water bodies at night across vast regions.
 
 -Galileo: every violation is logged with a Galileo-authenticated timestamp and precise coordinate, creating a "Digital Evidence Package" that is legally robust for regulatory enforcement.
 
